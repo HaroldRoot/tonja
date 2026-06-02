@@ -202,7 +202,10 @@ def stage_mapping(all_basic=None):
             contain.append((-rf, dst))
 
         # (B) 同主体：与 src 共享同一子主体，且满足结构 / 视觉侧约束。
-        if src in body_of:
+        #     仅当没有包含候选时才考虑——若 src 能被整体包含进别的字（如 早→章草卓），
+        #     说明 src 本身就是个被熟知、可整体认读的字，再拆成同主体的字（隼夲卑卒）
+        #     反而破坏整体识别，降低肉眼联想原字的成功率。
+        if not contain and src in body_of:
             body_sig, body_side = body_of[src]
             op_src = structured[src][0]
             for dst, op_dst, side_dst in chars_with_body.get(body_sig, ()):
