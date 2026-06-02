@@ -2,6 +2,9 @@
 # 注意：mapping.json 是前端运行所必需的，必须提交，不要忽略。
 all_basic_hanzi.json
 
+# 映射报告（由 build.py 生成，仅供本地查看）。
+report.md
+
 # 日志
 logs/
 

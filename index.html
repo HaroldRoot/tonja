@@ -310,6 +310,14 @@
             text-wrap: balance;
         }
 
+        /* 打字机把每条标语在逗号处拆成两段，分别放进 .title__line。
+           PC：两段 inline → 同一行（与历史行为一致，不会换行）。
+           移动端：两段 block → 在逗号处确定性换行，而不是撞到边界才突然折行；
+           空的第二行用 min-height 占位，打字过程中标题高度恒定、不抖动。 */
+        .title__line {
+            display: inline;
+        }
+
         .title em {
             font-style: italic;
             font-weight: 600;
@@ -481,6 +489,7 @@
             border: 1px solid transparent;
             cursor: pointer;
             user-select: none;
+            white-space: nowrap;
             -webkit-tap-highlight-color: transparent;
             transition:
                 transform 160ms cubic-bezier(0.2, 0.7, 0.2, 1),
@@ -650,6 +659,12 @@
                 font-size: 24px;
             }
 
+            /* 移动端：两段各占一行，在逗号处换行；预留两行高度防止抖动。 */
+            .title__line {
+                display: block;
+                min-height: 1.05em;
+            }
+
             .subtitle {
                 display: none;
             }
@@ -685,7 +700,9 @@
         <header class="hero">
             <div class="hero__lead">
                 <span class="eyebrow">通假字生成工具 · Word Obfuscation</span>
-                <h1 class="title"><span id="titleText">面对 AI 审查，我们<em>并非无计可施。</em></span><span class="caret" aria-hidden="true"></span></h1>
+                <h1 class="title">
+                    <span id="titleText"><span class="title__line">面对 AI 审查，</span><span class="title__line">我们<em>并非无计可施。</em><span class="caret" aria-hidden="true"></span></span></span>
+                </h1>
                 <p class="subtitle">把每个汉字替换成偏旁不同、主体相同的「形近字」。例如 <code>逼</code> → <code>福</code>。</p>
             </div>
 
@@ -747,7 +764,7 @@
             </button>
             <button id="convertButton" class="btn btn--primary" type="button">
                 <span class="btn__icon" aria-hidden="true">→</span>
-                <span>开始随机转换</span>
+                <span>随机转换</span>
             </button>
             <button id="copyButton" class="btn btn--secondary" type="button" title="复制转换结果">
                 <span class="btn__icon" aria-hidden="true">⎘</span>

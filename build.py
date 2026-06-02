@@ -8,6 +8,7 @@ import argparse
 import collections
 import os
 import sys
+import time
 
 from pypinyin import Style, lazy_pinyin
 
@@ -27,6 +28,7 @@ from utils import (
 IDS_SOURCE_FILE = "IDS-UCS-Basic.txt"
 ALL_BASIC_HANZI_FILE = "all_basic_hanzi.json"
 MAPPING_FILE = "mapping.json"
+REPORT_FILE = "report.md"
 
 # 一个部件在多少个字里出现，超过这个比例就认定它是「偏旁」而非「主体」。
 # 主体（被保留、有辨识度的部分）应当是出现频率较低的那个部件。
@@ -160,7 +162,9 @@ def stage_mapping(all_basic=None):
         chars_with_body[body_sig].append((char, op, body_side))
 
     # 4) 为每个字生成候选：先「包含」（整字作主体，更像原字），后「同主体」。
+    #    by_mechanism 记录每个字的映射出自哪种机制（A/B/C），供报告分类统计。
     mapping = {}
+    by_mechanism = {"A": [], "B": [], "C": []}
     for src in all_basic:
         contain, shared, seen = [], [], set()
 
@@ -191,6 +195,7 @@ def stage_mapping(all_basic=None):
         contain.sort()
         shared.sort()
         siblings = [c for _rf, c in contain] + [c for _rf, c in shared]
+        mechanism = "A" if contain else ("B" if shared else None)
 
         # (C) 兜底：A、B 都没有候选时，若主体本身是个同音真字，就「去偏旁」映射过去。
         #     例如 莱 ⿱艹来 既不被别的字包含、也找不到同主体兄弟，但「来」是真字且同音 lái。
@@ -198,43 +203,105 @@ def stage_mapping(all_basic=None):
             body_sig, _body_side = body_of[src]
             if len(body_sig) == 1 and body_sig in all_basic and _same_pinyin(src, body_sig):
                 siblings = [body_sig]
+                mechanism = "C"
 
         if siblings:
             mapping[src] = siblings[:MAX_CANDIDATES]
+            by_mechanism[mechanism].append(src)
 
     save_json(mapping, MAPPING_FILE, compact=True)
     pairs = sum(len(v) for v in mapping.values())
     print(f"生成 {MAPPING_FILE}：{len(mapping)} 个可替换字，共 {pairs} 条候选\n")
-    return mapping
+    return mapping, by_mechanism, all_basic
+
+
+# ──────────────────────────────────────────────
+# 报告：把映射结果按机制分类写成 markdown
+# ──────────────────────────────────────────────
+
+_MECHANISM_TITLES = {
+    "A": "A · 包含（src 是 dst 的主体，给 src 添偏旁）",
+    "B": "B · 同主体（src 与 dst 共享子主体，偏旁不同）",
+    "C": "C · 去偏旁兜底（主体本身是同音真字）",
+}
+
+
+def write_report(mapping, by_mechanism, all_basic, elapsed):
+    """把统计与逐字映射写成 markdown 报告（report.md，已 gitignore）。"""
+    total = len(all_basic)
+    mapped = len(mapping)
+    unmapped = sorted(c for c in all_basic if c not in mapping)
+
+    lines = [
+        "# 通假字映射报告",
+        "",
+        "## 总览",
+        "",
+        f"- 参与字数：**{total}**",
+        f"- 得到映射：**{mapped}**（{mapped / total:.1%}）",
+        f"- 未获映射：**{len(unmapped)}**（{len(unmapped) / total:.1%}）",
+        f"- 脚本用时：**{elapsed:.2f} s**",
+        "",
+        "### 按机制分类",
+        "",
+        "| 机制 | 字数 |",
+        "| --- | --- |",
+    ]
+    for key in ("A", "B", "C"):
+        lines.append(f"| {_MECHANISM_TITLES[key]} | {len(by_mechanism[key])} |")
+    lines.append("")
+
+    # 各机制逐字列出 src → 候选。
+    for key in ("A", "B", "C"):
+        chars = by_mechanism[key]
+        lines.append(f"## {_MECHANISM_TITLES[key]}（{len(chars)} 字）")
+        lines.append("")
+        if not chars:
+            lines.append("（无）")
+            lines.append("")
+            continue
+        for src in chars:
+            lines.append(f"- {src} → {' '.join(mapping[src])}")
+        lines.append("")
+
+    # 未获映射的字。
+    lines.append(f"## 未获映射（{len(unmapped)} 字）")
+    lines.append("")
+    lines.append("".join(unmapped) if unmapped else "（无）")
+    lines.append("")
+
+    with open(REPORT_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"生成 {REPORT_FILE}：{mapped} 映射 / {len(unmapped)} 未映射，用时 {elapsed:.2f}s\n")
 
 
 # ──────────────────────────────────────────────
 # 管线驱动
 # ──────────────────────────────────────────────
 
-STAGES = {
-    "basic": stage_basic,
-    "mapping": stage_mapping,
-}
-
-FULL_PIPELINE = ["basic", "mapping"]
+STAGE_CHOICES = ["basic", "mapping"]
 
 
 def main():
     parser = argparse.ArgumentParser(description="通假字数据管线")
     parser.add_argument(
         "--stage",
-        choices=list(STAGES.keys()),
+        choices=STAGE_CHOICES,
         help="只运行指定阶段（默认：全流程）",
     )
     args = parser.parse_args()
 
-    if args.stage:
-        STAGES[args.stage]()
+    start = time.perf_counter()
+    if args.stage == "basic":
+        stage_basic()
+    elif args.stage == "mapping":
+        mapping, by_mechanism, all_basic = stage_mapping()
+        write_report(mapping, by_mechanism, all_basic, time.perf_counter() - start)
     else:
         # 全流程：把 stage_basic 的结果直接传给 stage_mapping，省去一次磁盘读取。
         all_basic = stage_basic()
-        stage_mapping(all_basic)
+        mapping, by_mechanism, all_basic = stage_mapping(all_basic)
+        write_report(mapping, by_mechanism, all_basic, time.perf_counter() - start)
         print("全流程完成。")
 
 

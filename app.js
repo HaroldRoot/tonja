@@ -13,7 +13,7 @@ window.addEventListener('DOMContentLoaded', () => {
     let charMap = null;
     let toastTimer;
 
-    const convertLabelHTML = '<span class="btn__icon" aria-hidden="true">→</span><span>开始随机转换</span>';
+    const convertLabelHTML = '<span class="btn__icon" aria-hidden="true">→</span><span>随机转换</span>';
 
     function showToast(message, type = 'ok') {
         if (!toast) return;
@@ -163,9 +163,18 @@ function initTitleTypewriter() {
     const el = document.getElementById('titleText');
     if (!el) return;
 
+    // 每条标语按「行」组织：逗号处天然成行边界。每行是若干片段，em:true 的片段强调。
+    // PC 上两行 inline 合成一行；移动端两行 block，于是在逗号处确定性换行。
+    // 若新增更长的标语，行结构同理——无需改 HTML，渲染时会重建 .title__line。
     const phrases = [
-        [{ text: '面对 AI 审查，我们' }, { text: '并非无计可施。', em: true }],
-        [{ text: '生成随机偏旁，制造' }, { text: '认知污染。', em: true }],
+        [
+            [{ text: '面对 AI 审查，' }],
+            [{ text: '我们' }, { text: '并非无计可施。', em: true }],
+        ],
+        [
+            [{ text: '生成随机偏旁，' }],
+            [{ text: '制造' }, { text: '认知污染。', em: true }],
+        ],
     ];
 
     // 尊重「减少动态效果」偏好：保留 HTML 里的首条静态标语，不打字、不轮换。
@@ -178,33 +187,47 @@ function initTitleTypewriter() {
     const HOLD_MS = 2200;    // 打完后停留时长
     const GAP_MS = 500;      // 删完后切换到下一条前的空档
 
-    // 把一条标语展开成 [{ch, em}, ...] 的逐字序列，方便按长度截取并重建 HTML。
-    const expand = (segs) => segs.flatMap(s => [...s.text].map(ch => ({ ch, em: !!s.em })));
+    const esc = (ch) => ch.replace('&', '&amp;').replace('<', '&lt;');
 
-    const render = (chars) => {
-        let html = '';
+    // 把一条标语展开成 [{ch, em, line}, ...] 的逐字序列，line 记录该字属于第几行。
+    const expand = (lines) =>
+        lines.flatMap((segs, li) =>
+            segs.flatMap(s => [...s.text].map(ch => ({ ch, em: !!s.em, line: li }))));
+
+    // 按已打出的字符序列重建 HTML：每行一个 .title__line，最后一个字符后接光标。
+    // 尚未打到的行渲染成空 .title__line——移动端用 min-height 占位，高度恒定不抖动。
+    const render = (chars, lineCount) => {
+        const buckets = Array.from({ length: lineCount }, () => '');
         let inEm = false;
-        for (const { ch, em } of chars) {
-            if (em && !inEm) { html += '<em>'; inEm = true; }
-            else if (!em && inEm) { html += '</em>'; inEm = false; }
-            html += ch.replace('&', '&amp;').replace('<', '&lt;');
-        }
-        if (inEm) html += '</em>';
-        el.innerHTML = html;
+        chars.forEach(({ ch, em, line }, idx) => {
+            if (em && !inEm) { buckets[line] += '<em>'; inEm = true; }
+            else if (!em && inEm) { buckets[line] += '</em>'; inEm = false; }
+            buckets[line] += esc(ch);
+            if (idx === chars.length - 1) {
+                if (inEm) { buckets[line] += '</em>'; inEm = false; }
+                buckets[line] += '<span class="caret" aria-hidden="true"></span>';
+            }
+        });
+        // 没有任何字符时，光标停在第一行。
+        if (!chars.length) buckets[0] = '<span class="caret" aria-hidden="true"></span>';
+        el.innerHTML = buckets
+            .map(html => `<span class="title__line">${html}</span>`)
+            .join('');
     };
 
-    // phase: 'type' | 'hold' | 'erase' | 'gap'。首条已在 HTML 中打好，直接从 hold 开始。
+    // phase: 'type' | 'erase'。首条已在 HTML 中打好，直接从 hold 开始。
     let pi = 0;
     let i = expand(phrases[0]).length;
 
     const step = (phase) => {
         const full = expand(phrases[pi]);
+        const lineCount = phrases[pi].length;
         if (phase === 'type') {
-            render(full.slice(0, i));
+            render(full.slice(0, i), lineCount);
             if (i < full.length) { i++; setTimeout(() => step('type'), TYPE_MS); }
             else setTimeout(() => step('erase'), HOLD_MS);
         } else if (phase === 'erase') {
-            render(full.slice(0, i));
+            render(full.slice(0, i), lineCount);
             if (i > 0) { i--; setTimeout(() => step('erase'), ERASE_MS); }
             else { pi = (pi + 1) % phrases.length; setTimeout(() => step('type'), GAP_MS); }
         }
