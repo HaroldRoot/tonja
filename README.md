@@ -1,6 +1,8 @@
-# 通假字生成工具 · Word Obfuscation
+# Tonja 新时代通假字生成工具
 
 把一段中文里的每个汉字，替换成**偏旁不同、主体相同的「形近字」**。整句话一眼扫过去仍能联想出原意。
+
+注意，本项目与古代真实的通假字没有关系。
 
 ## 在线体验
 
@@ -59,4 +61,4 @@ python -m http.server
 
 ## 数据来源
 
-拆字数据 `IDS-UCS-Basic.txt` 来自 [CHISE IDS](http://www.chise.org/ids/) 项目。
+拆字数据 `IDS-UCS-Basic.txt` 来自 [CHISE IDS](https://gitlab.chise.org/CHISE/ids) 项目。
