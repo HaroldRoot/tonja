@@ -107,12 +107,26 @@ def stage_basic():
 # ──────────────────────────────────────────────
 # Stage 2: 生成 mapping.json（核心算法）
 # ──────────────────────────────────────────────
-# 思路（见 IDEA.md）：
-#   一个合体字 = 偏旁(radical) + 主体(body)。主体是有辨识度、出现频率低的部件；
-#   偏旁是高频、可被替换的部件。把「主体 + 它所在的视觉侧」作为分组键，
-#   同组的字互为通假候选——它们共享主体，只是偏旁不同，于是肉眼能联想原字，
-#   而结构符可以不同（逼 ⿺辶畐 与 福 ⿰示畐 同属「畐 · trail」组）。
-#   ⿰喿刂 的「喿」在左(lead)，与 ⿰扌喿 的「喿」在右(trail)不同组，自动排除。
+# 一个合体字 = 偏旁(radical) + 主体(body)。主体是有辨识度、出现频率低的部件。
+# 「原字 src 能替换成候选字 dst」有两种来源：
+#
+#   (A) 包含（containment）：src 整体就是 dst 的主体，dst 相当于「给 src 添了个偏旁」。
+#       例如 我 → 俄(⿰亻我)、哦(⿰口我)；早 → 章(⿱立早)、草(⿱艹早)、卓(⿱⺊早)。
+#       src 被完整保留，肉眼一定认得出，所以不限制 src 自身结构（独体字也行）。
+#
+#   (B) 同主体（shared body）：src 与 dst 共享同一个子主体 B，只是各自的偏旁不同。
+#       例如 操(⿰扌喿) → 懆(⿰忄喿)；你(⿰亻尔) → 称(⿰禾尔)。
+#       这种情况下必须满足下面的结构约束。
+#
+# 结构约束（仅作用于情况 B）：
+#   - 主体 B 在 src、dst 中必须位于相同的视觉侧（同为 trail 等）；
+#   - 顶层结构符必须相同（⿰↔⿰、⿱↔⿱…），唯一例外是允许 ⿺ → ⿰
+#     （为了 逼 ⿺辶畐 → 福 ⿰示畐），且方向单一——反向的 ⿰ → ⿺ 不允许。
+#     其余跨结构一律禁止：于是 早 ⿱日十 不会跨成 叶 ⿰口十，
+#     麻 ⿸广林 不会跨成 諃 ⿰言林，痹 ⿸疒畀 不会跨成 睤 ⿰目畀。
+
+ALLOWED_CROSS = {("⿺", "⿰")}   # (源结构, 目标结构) 唯一允许的跨结构方向
+
 
 def _structure_of(ids):
     """返回 (operator, [(child_sig, side), ...])；非合体字返回 (None, [])。"""
@@ -123,6 +137,18 @@ def _structure_of(ids):
     return op, [(sig, side_bucket(op, i, n)) for i, sig in enumerate(children)]
 
 
+def _op_compatible(op_src, op_dst):
+    """情况 B 的结构兼容性：同结构，或唯一允许的 ⿺→⿰ 跨结构。"""
+    return op_src == op_dst or (op_src, op_dst) in ALLOWED_CROSS
+
+
+def _radical_freq(parts, body_sig, comp_freq):
+    """dst 中「非主体」部件的最高频率，用来衡量被添加 / 替换的偏旁有多常见。
+    越常见 = 拼出来越像个真字，排序时优先。"""
+    others = [comp_freq[sig] for sig, _ in parts if sig != body_sig]
+    return max(others) if others else 0
+
+
 def stage_mapping(all_basic=None):
     print("=== Stage: mapping ===")
     if all_basic is None:
@@ -131,22 +157,23 @@ def stage_mapping(all_basic=None):
         all_basic = load_json(ALL_BASIC_HANZI_FILE)
 
     # 1) 解析每个字的顶层结构（优先表观结构）。
-    structured = {}            # char -> [(child_sig, side), ...]
+    structured = {}            # char -> (op, [(child_sig, side), ...])
     for char, info in all_basic.items():
         op, parts = _structure_of(choose_ids(info))
         if parts:
-            structured[char] = parts
+            structured[char] = (op, parts)
 
     # 2) 统计每个部件签名在多少个不同的字里出现（用于区分偏旁 / 主体）。
     comp_freq = collections.Counter()
-    for parts in structured.values():
+    for _op, parts in structured.values():
         for sig, _side in set(parts):     # 同一字内去重，避免叠字重复计数
             comp_freq[sig] += 1
 
-    # 3) 按「主体签名 + 视觉侧」分组。主体 = 字内频率最低且非平凡的部件。
-    pools = collections.defaultdict(list)     # (body_sig, side) -> [char, ...]
-    body_of = {}                               # char -> (body_sig, side)
-    for char, parts in structured.items():
+    # 3) 确定每个字的主体（频率最低且非平凡的顶层部件），并建立
+    #    主体签名 → [(字, 结构符, 视觉侧)] 索引，供两种匹配查询。
+    body_of = {}                                       # char -> (body_sig, body_side)
+    chars_with_body = collections.defaultdict(list)    # body_sig -> [(char, op, side)]
+    for char, (op, parts) in structured.items():
         # 候选主体：排除平凡部件；必须至少在 2 个字里出现，才有替换余地。
         cands = [
             (comp_freq[sig], sig, side)
@@ -157,30 +184,46 @@ def stage_mapping(all_basic=None):
             continue
         # 频率最低 = 最有辨识度的主体；同频时取签名较长者更稳健。
         cands.sort(key=lambda t: (t[0], -len(t[1])))
-        _freq, body_sig, side = cands[0]
-        body_of[char] = (body_sig, side)
-        pools[(body_sig, side)].append(char)
+        _freq, body_sig, body_side = cands[0]
+        body_of[char] = (body_sig, body_side)
+        chars_with_body[body_sig].append((char, op, body_side))
 
-    # 4) 为每个字生成候选列表：同组内的其他字。
+    # 4) 为每个字生成候选：先「包含」（整字作主体，更像原字），后「同主体」。
     mapping = {}
-    for char, key in body_of.items():
-        siblings = [c for c in pools[key] if c != char]
-        if not siblings:
-            continue
-        # 确定性排序：先按「替换后偏旁越常见越自然」（偏旁高频优先），再按字符。
-        siblings.sort(key=lambda c: (-_radical_freq(structured[c], key[0], comp_freq), c))
-        mapping[char] = siblings[:MAX_CANDIDATES]
+    for src in all_basic:
+        contain, shared, seen = [], [], set()
+
+        # (A) 包含：dst 的主体就是整字 src —— 给 src 添偏旁即得 dst，不限结构。
+        for dst, _op_dst, _side_dst in chars_with_body.get(src, ()):
+            if dst == src or dst in seen:
+                continue
+            seen.add(dst)
+            rf = _radical_freq(structured[dst][1], src, comp_freq)
+            contain.append((-rf, dst))
+
+        # (B) 同主体：与 src 共享同一子主体，且满足结构 / 视觉侧约束。
+        if src in body_of:
+            body_sig, body_side = body_of[src]
+            op_src = structured[src][0]
+            for dst, op_dst, side_dst in chars_with_body.get(body_sig, ()):
+                if dst == src or dst in seen:
+                    continue
+                if side_dst != body_side or not _op_compatible(op_src, op_dst):
+                    continue
+                seen.add(dst)
+                rf = _radical_freq(structured[dst][1], body_sig, comp_freq)
+                shared.append((-rf, dst))
+
+        contain.sort()
+        shared.sort()
+        siblings = [c for _rf, c in contain] + [c for _rf, c in shared]
+        if siblings:
+            mapping[src] = siblings[:MAX_CANDIDATES]
 
     save_json(mapping, MAPPING_FILE, compact=True)
     pairs = sum(len(v) for v in mapping.values())
     print(f"生成 {MAPPING_FILE}：{len(mapping)} 个可替换字，共 {pairs} 条候选\n")
     return mapping
-
-
-def _radical_freq(parts, body_sig, comp_freq):
-    """该字中「非主体」部件的最高频率，用来衡量这个字的偏旁有多常见。"""
-    others = [comp_freq[sig] for sig, _ in parts if sig != body_sig]
-    return max(others) if others else 0
 
 
 # ──────────────────────────────────────────────
