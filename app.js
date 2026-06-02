@@ -13,7 +13,7 @@ window.addEventListener('DOMContentLoaded', () => {
     let charMap = null;
     let toastTimer;
 
-    const convertLabelHTML = '<span class="btn__icon" aria-hidden="true">→</span><span>开始转换</span>';
+    const convertLabelHTML = '<span class="btn__icon" aria-hidden="true">→</span><span>开始随机转换</span>';
 
     function showToast(message, type = 'ok') {
         if (!toast) return;
@@ -153,4 +153,62 @@ window.addEventListener('DOMContentLoaded', () => {
 
     updateCounts();
     loadMapping();
+
+    initTitleTypewriter();
 });
+
+// 标题打字机：在多条标语之间轮换——逐字打出、停留、再逐字删除，右侧光标由 CSS 闪烁。
+// 每条标语拆成若干片段，em:true 的片段用 <em> 包裹（强调色）。
+function initTitleTypewriter() {
+    const el = document.getElementById('titleText');
+    if (!el) return;
+
+    const phrases = [
+        [{ text: '面对 AI 审查，我们' }, { text: '并非无计可施。', em: true }],
+        [{ text: '生成随机偏旁，制造' }, { text: '认知污染。', em: true }],
+    ];
+
+    // 尊重「减少动态效果」偏好：保留 HTML 里的首条静态标语，不打字、不轮换。
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        return;
+    }
+
+    const TYPE_MS = 110;     // 每打出一个字的间隔
+    const ERASE_MS = 55;     // 每删除一个字的间隔
+    const HOLD_MS = 2200;    // 打完后停留时长
+    const GAP_MS = 500;      // 删完后切换到下一条前的空档
+
+    // 把一条标语展开成 [{ch, em}, ...] 的逐字序列，方便按长度截取并重建 HTML。
+    const expand = (segs) => segs.flatMap(s => [...s.text].map(ch => ({ ch, em: !!s.em })));
+
+    const render = (chars) => {
+        let html = '';
+        let inEm = false;
+        for (const { ch, em } of chars) {
+            if (em && !inEm) { html += '<em>'; inEm = true; }
+            else if (!em && inEm) { html += '</em>'; inEm = false; }
+            html += ch.replace('&', '&amp;').replace('<', '&lt;');
+        }
+        if (inEm) html += '</em>';
+        el.innerHTML = html;
+    };
+
+    // phase: 'type' | 'hold' | 'erase' | 'gap'。首条已在 HTML 中打好，直接从 hold 开始。
+    let pi = 0;
+    let i = expand(phrases[0]).length;
+
+    const step = (phase) => {
+        const full = expand(phrases[pi]);
+        if (phase === 'type') {
+            render(full.slice(0, i));
+            if (i < full.length) { i++; setTimeout(() => step('type'), TYPE_MS); }
+            else setTimeout(() => step('erase'), HOLD_MS);
+        } else if (phase === 'erase') {
+            render(full.slice(0, i));
+            if (i > 0) { i--; setTimeout(() => step('erase'), ERASE_MS); }
+            else { pi = (pi + 1) % phrases.length; setTimeout(() => step('type'), GAP_MS); }
+        }
+    };
+
+    setTimeout(() => step('erase'), HOLD_MS);
+}

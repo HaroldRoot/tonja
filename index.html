@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="description" content="通假字生成工具。">
-    <meta name="theme-color" content="#F4EFE6">
+    <meta name="theme-color" content="#FDEEF4">
     <title>通假字生成工具 · Word Obfuscation</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,22 +22,22 @@
         }
 
         :root {
-            --bg: #F4EFE6;
-            --bg-tint: #ECE3D2;
-            --surface: rgba(255, 253, 249, 0.74);
-            --surface-strong: #FBF8F2;
-            --ink: #1B1814;
-            --ink-soft: #5C544A;
-            --ink-mute: #8E867B;
-            --line: rgba(27, 24, 20, 0.08);
-            --line-strong: rgba(27, 24, 20, 0.18);
-            --accent: #B7410E;
-            --accent-deep: #8C2F08;
-            --accent-soft: rgba(183, 65, 14, 0.10);
+            --bg: #FDEEF4;
+            --bg-tint: #F8DCE8;
+            --surface: rgba(255, 250, 252, 0.76);
+            --surface-strong: #FFF6FA;
+            --ink: #2A141F;
+            --ink-soft: #6E4E5C;
+            --ink-mute: #A07F8C;
+            --line: rgba(42, 20, 31, 0.08);
+            --line-strong: rgba(42, 20, 31, 0.18);
+            --accent: #D6336C;
+            --accent-deep: #A61E4D;
+            --accent-soft: rgba(214, 51, 108, 0.10);
             --ok: #2F6F4E;
-            --err: #7A1F12;
-            --shadow-md: 0 14px 36px -16px rgba(76, 50, 30, 0.22), 0 2px 6px rgba(76, 50, 30, 0.05);
-            --shadow-btn: 0 10px 24px -10px rgba(27, 24, 20, 0.45);
+            --err: #A61E4D;
+            --shadow-md: 0 14px 36px -16px rgba(120, 40, 70, 0.22), 0 2px 6px rgba(120, 40, 70, 0.06);
+            --shadow-btn: 0 10px 24px -10px rgba(42, 20, 31, 0.42);
             --radius-sm: 10px;
             --radius-md: 14px;
             --radius-lg: 22px;
@@ -58,8 +58,8 @@
             color: var(--ink);
             background: var(--bg);
             background-image:
-                radial-gradient(1100px 760px at 88% -8%, rgba(183, 65, 14, 0.10), transparent 60%),
-                radial-gradient(900px 720px at -8% 108%, rgba(38, 70, 83, 0.07), transparent 55%),
+                radial-gradient(1100px 760px at 88% -8%, rgba(214, 51, 108, 0.12), transparent 60%),
+                radial-gradient(900px 720px at -8% 108%, rgba(150, 60, 130, 0.08), transparent 55%),
                 linear-gradient(180deg, var(--bg) 0%, var(--bg-tint) 100%);
             text-rendering: optimizeLegibility;
             -webkit-font-smoothing: antialiased;
@@ -184,8 +184,8 @@
             border: 1px solid var(--line);
             border-radius: var(--radius-md);
             box-shadow:
-                0 28px 60px -22px rgba(76, 50, 30, 0.32),
-                0 4px 12px rgba(76, 50, 30, 0.06),
+                0 28px 60px -22px rgba(120, 40, 70, 0.32),
+                0 4px 12px rgba(120, 40, 70, 0.06),
                 inset 0 1px 0 rgba(255, 255, 255, 0.6);
             backdrop-filter: blur(16px) saturate(120%);
             -webkit-backdrop-filter: blur(16px) saturate(120%);
@@ -314,6 +314,26 @@
             font-style: italic;
             font-weight: 600;
             color: var(--accent);
+        }
+
+        .title .caret {
+            display: inline-block;
+            width: 3px;
+            height: 0.95em;
+            margin-left: 2px;
+            vertical-align: -0.12em;
+            background: var(--accent);
+            border-radius: 1px;
+            animation: caret-blink 1.05s steps(1) infinite;
+        }
+
+        @keyframes caret-blink {
+            0%, 49% { opacity: 1; }
+            50%, 100% { opacity: 0; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .title .caret { animation: none; opacity: 1; }
         }
 
         .subtitle {
@@ -496,7 +516,7 @@
         }
 
         .btn--primary:hover {
-            background: #2A241D;
+            background: #3A1A28;
         }
 
         .btn--primary[disabled] {
@@ -507,8 +527,8 @@
 
         .btn--secondary {
             background: var(--accent);
-            color: #FBF8F2;
-            box-shadow: 0 10px 24px -10px rgba(183, 65, 14, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+            color: #FFF6FA;
+            box-shadow: 0 10px 24px -10px rgba(214, 51, 108, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.12);
         }
 
         .btn--secondary:hover {
@@ -665,8 +685,8 @@
         <header class="hero">
             <div class="hero__lead">
                 <span class="eyebrow">通假字生成工具 · Word Obfuscation</span>
-                <h1 class="title">面对 AI 审查，我们<em>并非无计可施。</em></h1>
-                <p class="subtitle">把每个汉字替换成偏旁不同、主体相同的「形近字」。肉眼一扫便能联想原文，逐字细看却字字不对劲。例如 <code>操你妈逼</code> → <code>懆称冯福</code>。</p>
+                <h1 class="title"><span id="titleText">面对 AI 审查，我们<em>并非无计可施。</em></span><span class="caret" aria-hidden="true"></span></h1>
+                <p class="subtitle">把每个汉字替换成偏旁不同、主体相同的「形近字」。例如 <code>逼</code> → <code>福</code>。</p>
             </div>
 
             <div class="more" id="more">
@@ -707,7 +727,7 @@
                 </div>
                 <label for="inputText" class="visually-hidden" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);">说说原文</label>
                 <textarea id="inputText" spellcheck="false"
-                    placeholder="在此输入原文……">我早已麻痹</textarea>
+                    placeholder="在此输入原文……">在拉莱耶的宅邸中，沉眠的克苏鲁等待着梦境。</textarea>
             </div>
 
             <div class="panel panel--output">
@@ -727,7 +747,7 @@
             </button>
             <button id="convertButton" class="btn btn--primary" type="button">
                 <span class="btn__icon" aria-hidden="true">→</span>
-                <span>开始转换</span>
+                <span>开始随机转换</span>
             </button>
             <button id="copyButton" class="btn btn--secondary" type="button" title="复制转换结果">
                 <span class="btn__icon" aria-hidden="true">⎘</span>

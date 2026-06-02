@@ -1,131 +1,102 @@
+"""通用工具集：IDS（表意文字描述序列）解析 + JSON / IDS 文件 I/O。
+
+这里只放**与具体项目无关、可复用**的代码：
+  - IDS 字符串的拆解（拍平的部件列表）与结构树解析（保留顶层结构 / 视觉侧）；
+  - 读写 JSON、解析 CHISE 风格的 IDS .txt 数据文件。
+项目特定的算法（主体识别、通假候选生成）放在 build.py。
+"""
+
+import json
 import re
-import os
-from datetime import datetime
-import logging
 
 
-# Ideographic Description Characters (IDC)
-# 表意文字描述字符
-# 1. Unicode range: [\u2FF0-\u2FFF] ⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻⿼⿽⿾⿿
+# ──────────────────────────────────────────────
+# JSON / IDS 文件 I/O
+# ──────────────────────────────────────────────
+
+def load_json(path):
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_json(data, path, compact=False):
+    with open(path, "w", encoding="utf-8") as f:
+        if compact:
+            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+        else:
+            json.dump(data, f, ensure_ascii=False, indent=4, sort_keys=True)
+
+
+def parse_ids_file(filepath):
+    """解析 CHISE 风格的 IDS .txt 文件。
+
+    每行格式为 `<codepoint>\\t<char>\\t<IDS>[\\t@apparent=<IDS>][\\t...]`，
+    `;;` 开头为注释。返回 { char: {Codepoint, IDS, IDS_apparent} } 字典。
+    """
+    records = {}
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith(";;") or not line:
+                continue
+            parts = line.split("\t")
+            if len(parts) < 3:
+                continue
+            codepoint, character, ids = parts[0], parts[1], parts[2]
+            if len(character) != 1:
+                continue
+            ids_apparent = ""
+            for part in parts[3:]:
+                if part.startswith("@apparent="):
+                    ids_apparent = part.split("=", 1)[1]
+                    break
+            records[character] = {
+                "Codepoint": codepoint,
+                "IDS": ids,
+                "IDS_apparent": ids_apparent,
+            }
+    return records
+
+
+def choose_ids(info):
+    """优先使用表观结构（@apparent），它更贴近肉眼看到的字形；否则用功能结构。"""
+    return info.get("IDS_apparent") or info.get("IDS") or ""
+
+
+# ──────────────────────────────────────────────
+# IDS 部件拆解（拍平）
+# ──────────────────────────────────────────────
+# Ideographic Description Characters (IDC) 表意文字描述字符：
+# 1. Unicode range: [⿰-⿿] ⿰⿱⿲⿳⿴⿵⿶⿷⿸⿹⿺⿻⿼⿽⿾⿿
 # 2. Extended IDC (Non-abstract IDC): &U-i001+2FF1; &U-i001+2FFB; &U-i002+2FF1;
 # 3. 不在 IDC 区块的: U+303E 形似但不相等, U+31EF 减去笔画, U+2B1A 指无法分割的整体字
-# 4. 全角问号字符 U+FF1F ？ 例如 IDS-UCS-Ext-D.txt U-0002B756	𫝖	⿸厃？
-IDC_REGEX = r'[\u2FF0-\u2FFF]|&U-i\d+\+2FF[1B];|\u303E|\u31EF|\u2B1A|\uFF1F'
-
-
-def setup_logger():
-    log_dir = "logs"
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    
-    # 生成带时间戳的日志文件名，例如: logs/mapping_update_20231027.log
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_filename = os.path.join(log_dir, f"mapping_update_{timestamp}.log")
-    
-    logger = logging.getLogger("MappingUpdater")
-    logger.setLevel(logging.INFO)
-    
-    # 清除旧的 handlers 避免重复打印
-    if logger.hasHandlers():
-        logger.handlers.clear()
-
-    # File Handler (写入文件)
-    file_handler = logging.FileHandler(log_filename, encoding='utf-8')
-    file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    file_handler.setFormatter(file_formatter)
-    
-    # Stream Handler (输出到控制台)
-    console_handler = logging.StreamHandler()
-    console_formatter = logging.Formatter('%(message)s') # 控制台只打印简略信息
-    console_handler.setFormatter(console_formatter)
-    
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    logger.info(f"日志已初始化，写入文件: {log_filename}")
-    return logger
+# 4. 全角问号字符 U+FF1F ？ 例如 U-0002B756	𫝖	⿸厃？
+IDC_REGEX = r'[⿰-⿿]|&U-i\d+\+2FF[1B];|〾|㇯|⬚|？'
 
 
 def get_ids_components_list(ids_str, remove_char=None):
-    """
-    将 IDS 字符串解析为组件列表 (List)。
-    """
+    """将 IDS 字符串拍平为组件列表（保留重复项，丢弃结构信息）。"""
     if not ids_str:
         return []
-    
-    # 1. 移除 IDC
+
+    # 1. 移除 IDC 结构符
     cleaned = re.sub(IDC_REGEX, '', ids_str)
-    
-    # 2. 提取实体组件 (例如 &CDP-8BBF;)
+
+    # 2. 提取实体组件（例如 &CDP-8BBF;）
     entities = re.findall(r'&[^;]+;', cleaned)
-    
-    # 3. 提取普通汉字 (移除实体后剩余的部分)
+
+    # 3. 提取普通汉字（移除实体后剩余的部分）
     temp_str = re.sub(r'&[^;]+;', '', cleaned)
-    chars = list(temp_str) # 转为 list，保留重复项
-    
+    chars = list(temp_str)  # 转为 list，保留重复项
+
     # 4. 合并
     all_comps = chars + entities
-    
-    # 5. 如果需要移除目标字符 (例如 '女')
+
+    # 5. 如需移除目标字符（例如 '女'）
     if remove_char:
-        # 使用列表推导式过滤，保留其他重复的组件
         all_comps = [c for c in all_comps if c != remove_char]
-        
+
     return all_comps
-
-
-def get_components_except_target_char(ids_str, target_char='女'):
-    """
-    将 IDS 字符串解析为组件集合。
-    1. 移除指定的 IDC 结构符（包括 Unicode IDC 和 Extended IDC）。
-    2. 将剩余部分中的 &...; 实体视为一个完整的组件。
-    3. 将剩余的普通汉字视为组件。
-    4. 返回一个字符集合 set。
-    """
-    if not ids_str:
-        return set()
-    
-    # 1. 移除 IDC
-    cleaned = re.sub(IDC_REGEX, '', ids_str)
-    
-    # 2. 提取实体组件 (例如 &CDP-8BBF;)
-    # 使用 findall 找到所有 &...; 格式的字符串
-    entities = set(re.findall(r'&[^;]+;', cleaned))
-    
-    # 3. 为了提取普通汉字，先将实体从字符串中移除，避免 & c d p ; 被拆成单字
-    temp_str = re.sub(r'&[^;]+;', '', cleaned)
-    
-    # 4. 提取普通字符组件，并移除目标字符
-    chars = set(temp_str)
-    chars.discard(target_char)
-    
-    # 5. 合并实体集合和字符集合
-    return chars | entities
-
-
-def extract_single_component(ids_str, target_char='女'):
-    """
-    从 IDS 字符串中，去除 IDC 字符和 target_char 后，如果只剩下一个汉字，则返回该汉字。
-    否则返回 None。
-    """
-    comps = get_ids_components_list(ids_str, target_char)
-    if len(comps) == 1 and len(comps[0]) == 1:
-        return comps[0]
-    return None
-
-
-def remove_existing_keys_from_mapping(mapping_data, reference_keys_set):
-    """
-    从 mapping_data 字典中删除在 reference_keys_set 中已有的键。
-    """
-    removed_count = 0
-    # 遍历时创建键的列表副本，以便安全地修改字典
-    for key in list(mapping_data.keys()):
-        if key in reference_keys_set:
-            del mapping_data[key]
-            removed_count += 1
-
-    return removed_count
 
 
 # ──────────────────────────────────────────────

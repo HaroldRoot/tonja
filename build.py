@@ -1,13 +1,22 @@
+"""通假字数据管线（本项目特定）。
+
+把 CJK 基本汉字按 IDS 拆解，为每个字生成「偏旁不同、主体相同」的形近候选，
+产出前端使用的 mapping.json。通用的 IDS 解析 / 文件 I/O 在 utils.py。
+"""
+
 import argparse
 import collections
-import json
 import os
 import sys
 
+from pypinyin import Style, lazy_pinyin
+
 from utils import (
+    choose_ids,
     get_ids_components_list,
-    parse_ids_tree,
-    serialize_tree,
+    load_json,
+    parse_ids_file,
+    save_json,
     side_bucket,
     top_level_components,
 )
@@ -28,55 +37,6 @@ MIN_BODY_LEN = 1             # 主体签名最短长度（过滤掉空主体）
 # 过于常见、单独作为「主体」没有辨识度的部件——即便偶然成为某字的最低频部件也跳过。
 # 这些大多是独体笔画或极简部件，共享它们不会让两个字「看起来像」。
 TRIVIAL_BODIES = set("一丨丶丿乙亅丷冂冖凵") | {""}
-
-
-# ──────────────────────────────────────────────
-# 公共 I/O 工具
-# ──────────────────────────────────────────────
-
-def load_json(path):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_json(data, path, compact=False):
-    with open(path, "w", encoding="utf-8") as f:
-        if compact:
-            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
-        else:
-            json.dump(data, f, ensure_ascii=False, indent=4, sort_keys=True)
-
-
-def parse_ids_file(filepath):
-    """解析单个 IDS .txt 文件，返回 { char: {Codepoint, IDS, IDS_apparent} } 字典。"""
-    records = {}
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith(";;") or not line:
-                continue
-            parts = line.split("\t")
-            if len(parts) < 3:
-                continue
-            codepoint, character, ids = parts[0], parts[1], parts[2]
-            if len(character) != 1:
-                continue
-            ids_apparent = ""
-            for part in parts[3:]:
-                if part.startswith("@apparent="):
-                    ids_apparent = part.split("=", 1)[1]
-                    break
-            records[character] = {
-                "Codepoint": codepoint,
-                "IDS": ids,
-                "IDS_apparent": ids_apparent,
-            }
-    return records
-
-
-def choose_ids(info):
-    """优先使用表观结构（@apparent），它更贴近肉眼看到的字形；否则用功能结构。"""
-    return info.get("IDS_apparent") or info.get("IDS") or ""
 
 
 # ──────────────────────────────────────────────
@@ -124,6 +84,10 @@ def stage_basic():
 #     （为了 逼 ⿺辶畐 → 福 ⿰示畐），且方向单一——反向的 ⿰ → ⿺ 不允许。
 #     其余跨结构一律禁止：于是 早 ⿱日十 不会跨成 叶 ⿰口十，
 #     麻 ⿸广林 不会跨成 諃 ⿰言林，痹 ⿸疒畀 不会跨成 睤 ⿰目畀。
+#
+# 兜底（情况 A、B 都没有候选时）：
+#   (C) 去偏旁（strip radical）：若 src 的主体 B 本身是个真字，且与 src 同音（拼音完全
+#       相同），就把 src 映射成 B —— 相当于「擦掉偏旁」。例如 莱(⿱艹来) → 来，读音都是 lái。
 
 ALLOWED_CROSS = {("⿺", "⿰")}   # (源结构, 目标结构) 唯一允许的跨结构方向
 
@@ -147,6 +111,13 @@ def _radical_freq(parts, body_sig, comp_freq):
     越常见 = 拼出来越像个真字，排序时优先。"""
     others = [comp_freq[sig] for sig, _ in parts if sig != body_sig]
     return max(others) if others else 0
+
+
+def _same_pinyin(a, b):
+    """两个单字读音是否完全相同（忽略声调，取首选读音）。"""
+    pa = lazy_pinyin(a, style=Style.NORMAL)
+    pb = lazy_pinyin(b, style=Style.NORMAL)
+    return bool(pa) and pa == pb
 
 
 def stage_mapping(all_basic=None):
@@ -220,6 +191,14 @@ def stage_mapping(all_basic=None):
         contain.sort()
         shared.sort()
         siblings = [c for _rf, c in contain] + [c for _rf, c in shared]
+
+        # (C) 兜底：A、B 都没有候选时，若主体本身是个同音真字，就「去偏旁」映射过去。
+        #     例如 莱 ⿱艹来 既不被别的字包含、也找不到同主体兄弟，但「来」是真字且同音 lái。
+        if not siblings and src in body_of:
+            body_sig, _body_side = body_of[src]
+            if len(body_sig) == 1 and body_sig in all_basic and _same_pinyin(src, body_sig):
+                siblings = [body_sig]
+
         if siblings:
             mapping[src] = siblings[:MAX_CANDIDATES]
 
@@ -261,4 +240,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

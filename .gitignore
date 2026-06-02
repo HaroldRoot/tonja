@@ -1,6 +1,3 @@
-# 设计草稿，不公开
-IDEA.md
-
 # 构建中间产物（体积大、可由 build.py 重新生成）。
 # 注意：mapping.json 是前端运行所必需的，必须提交，不要忽略。
 all_basic_hanzi.json
