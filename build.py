@@ -122,6 +122,19 @@ def _same_pinyin(a, b):
     return bool(pa) and pa == pb
 
 
+def _forbidden_bodies(char, ids):
+    """按 IDS 字面判断该字哪些顶层部件禁止当主体——它们本质是偏旁，作主体会破坏字形识别。
+       规则：含「灬」时灬不可（除非该字就是「灬」）；含「⿺辶」或「⿺⻌」时辶/⻌不可；含「⿺走」时走不可。"""
+    forbidden = set()
+    if "灬" in ids and char != "灬":
+        forbidden.add("灬")
+    if "⿺辶" in ids or "⿺⻌" in ids:
+        forbidden.update(("辶", "⻌"))
+    if "⿺走" in ids:
+        forbidden.add("走")
+    return forbidden
+
+
 def stage_mapping(all_basic=None):
     print("=== Stage: mapping ===")
     if all_basic is None:
@@ -147,11 +160,14 @@ def stage_mapping(all_basic=None):
     body_of = {}                                       # char -> (body_sig, body_side)
     chars_with_body = collections.defaultdict(list)    # body_sig -> [(char, op, side)]
     for char, (op, parts) in structured.items():
-        # 候选主体：排除平凡部件；必须至少在 2 个字里出现，才有替换余地。
+        # 候选主体：排除平凡部件 + 按 IDS 字面禁止的偏旁（灬 / 辶 / ⻌ / 走）；
+        # 必须至少在 2 个字里出现，才有替换余地。
+        forbidden = _forbidden_bodies(char, choose_ids(all_basic[char]))
         cands = [
             (comp_freq[sig], sig, side)
             for sig, side in parts
-            if sig not in TRIVIAL_BODIES and len(sig) >= MIN_BODY_LEN and comp_freq[sig] >= 2
+            if sig not in TRIVIAL_BODIES and sig not in forbidden
+            and len(sig) >= MIN_BODY_LEN and comp_freq[sig] >= 2
         ]
         if not cands:
             continue
